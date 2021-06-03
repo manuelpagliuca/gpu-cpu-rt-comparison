@@ -15,7 +15,6 @@
 #include "vec3.h"
 
 // Classe per il raggio
-
 class ray
 {
 public:
