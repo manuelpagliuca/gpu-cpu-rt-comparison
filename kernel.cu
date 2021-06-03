@@ -5,16 +5,121 @@
 #include <iostream>
 #include <vector>
 #include <cfloat>
-#include "ray.h"
-#include "vec3.h"
-#include "hitable.h"
-#include "sphere.h"
-#include "hitable_list.h"
 
 // STB_IMAGE
 #include "stb/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
+
+// Classe vec3
+#include "vec3.h"
+
+// Classe per il raggio
+
+class ray
+{
+public:
+    __device__ ray() {}
+    __device__ ray(const Vec3 &a, const Vec3 &b)
+    {
+        A = a;
+        B = b;
+    }
+    __device__ Vec3 origin() const { return A; }
+    __device__ Vec3 direction() const { return B; }
+    __device__ Vec3 point_at_parameter(float t) const { return A + t * B; }
+
+    Vec3 A;
+    Vec3 B;
+};
+
+// Record per gli oggetti
+struct hit_record
+{
+    float t;
+    Vec3 p;
+    Vec3 normal;
+};
+
+// Classe astratta di oggetti che possono essere colpiti
+class hitable
+{
+public:
+    __device__ virtual bool hit(const ray &r, float t_min, float t_max, hit_record &rec) const = 0;
+};
+
+// Sfera (hitable)
+class sphere : public hitable
+{
+public:
+    __device__ sphere() {}
+    __device__ sphere(Vec3 cen, float r) : center(cen), radius(r){};
+    __device__ virtual bool hit(const ray &r, float tmin, float tmax, hit_record &rec) const;
+    Vec3 center;
+    float radius;
+};
+
+__device__ bool sphere::hit(const ray &r, float t_min, float t_max, hit_record &rec) const
+{
+    Vec3 oc = r.origin() - center;
+    float a = dot(r.direction(), r.direction());
+    float b = dot(oc, r.direction());
+    float c = dot(oc, oc) - radius * radius;
+    float discriminant = b * b - a * c;
+    if (discriminant > 0)
+    {
+        float temp = (-b - sqrt(discriminant)) / a;
+        if (temp < t_max && temp > t_min)
+        {
+            rec.t = temp;
+            rec.p = r.point_at_parameter(rec.t);
+            rec.normal = (rec.p - center) / radius;
+            return true;
+        }
+        temp = (-b + sqrt(discriminant)) / a;
+        if (temp < t_max && temp > t_min)
+        {
+            rec.t = temp;
+            rec.p = r.point_at_parameter(rec.t);
+            rec.normal = (rec.p - center) / radius;
+            return true;
+        }
+    }
+    return false;
+};
+
+// Lista di oggetti colpibili da Ray
+class hitable_list : public hitable
+{
+public:
+    __device__ hitable_list() {}
+    __device__ hitable_list(hitable **l, int n)
+    {
+        list = l;
+        list_size = n;
+    }
+    __device__ virtual bool hit(const ray &r, float tmin, float tmax, hit_record &rec) const;
+    hitable **list;
+    int list_size;
+};
+
+//
+__device__ bool hitable_list::hit(const ray &r, float t_min, float t_max, hit_record &rec) const
+{
+    hit_record temp_rec;
+    bool hit_anything = false;
+    float closest_so_far = t_max;
+    for (int i = 0; i < list_size; i++)
+    {
+        if (list[i]->hit(r, t_min, closest_so_far, temp_rec))
+        {
+            hit_anything = true;
+            closest_so_far = temp_rec.t;
+            rec = temp_rec;
+        }
+    }
+    return hit_anything;
+}
 
 // limited version of checkCudaErrors from helper_cuda.h in CUDA examples
 #define checkCudaErrors(val) check_cuda((val), #val, __FILE__, __LINE__)
@@ -59,15 +164,19 @@ __global__ void render(Vec3 *fb, int max_x, int max_y,
                        Vec3 lower_left_corner, Vec3 horizontal,
                        Vec3 vertical, Vec3 origin, hitable **world)
 {
-    int const i = threadIdx.x + blockIdx.x * blockDim.x;
-    int const j = threadIdx.y + blockIdx.y * blockDim.y;
+    int const i = threadIdx.x + blockIdx.x * blockDim.x; // Mi identifica i thread sulle ascisse della griglia
+    int const j = threadIdx.y + blockIdx.y * blockDim.y; // Mi identifica i thread sulle ordinate della griglia
 
     if ((i >= max_x) || (j >= max_y))
         return;
 
+    // Indice del pixel su memoria contigua
     int const pixel_index = j * max_x + i;
+
     float u = float(i) / float(max_x);
     float v = float(j) / float(max_y);
+
+    // Costruzione del raggio
     ray r(origin, lower_left_corner + u * horizontal + v * vertical);
     fb[pixel_index] = color(r, world);
 }
