@@ -6,7 +6,6 @@
 
 class vec3
 {
-
 public:
     __host__ __device__ vec3() {}
     __host__ __device__ vec3(float e0, float e1, float e2)
