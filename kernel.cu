@@ -1,15 +1,16 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
+#include "curand_kernel.h"
 
-#include <time.h>
+#include <ctime>
 #include <iostream>
 #include <vector>
 #include <cfloat>
 
 // STB_IMAGE
-#include "stb/stb_image.h"
+#include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb/stb_image_write.h"
+#include "stb_image_write.h"
 
 // Classe vec3
 #include "vec3.h"
@@ -19,25 +20,25 @@ class ray
 {
 public:
     __device__ ray() {}
-    __device__ ray(const Vec3 &a, const Vec3 &b)
+    __device__ ray(const vec3 &a, const vec3 &b)
     {
         A = a;
         B = b;
     }
-    __device__ Vec3 origin() const { return A; }
-    __device__ Vec3 direction() const { return B; }
-    __device__ Vec3 point_at_parameter(float t) const { return A + t * B; }
+    __device__ vec3 origin() const { return A; }
+    __device__ vec3 direction() const { return B; }
+    __device__ vec3 point_at_parameter(float t) const { return A + t * B; }
 
-    Vec3 A;
-    Vec3 B;
+    vec3 A;
+    vec3 B;
 };
 
 // Record per gli oggetti
 struct hit_record
 {
     float t;
-    Vec3 p;
-    Vec3 normal;
+    vec3 p;
+    vec3 normal;
 };
 
 // Classe astratta di oggetti che possono essere colpiti
@@ -47,27 +48,30 @@ public:
     __device__ virtual bool hit(const ray &r, float t_min, float t_max, hit_record &rec) const = 0;
 };
 
-// Sfera (hitable)
+// SFERA (hitable)
 class sphere : public hitable
 {
 public:
     __device__ sphere() {}
-    __device__ sphere(Vec3 cen, float r) : center(cen), radius(r){};
+    __device__ sphere(vec3 cen, float r) : center(cen), radius(r){};
     __device__ virtual bool hit(const ray &r, float tmin, float tmax, hit_record &rec) const;
-    Vec3 center;
+    vec3 center;
     float radius;
 };
 
 __device__ bool sphere::hit(const ray &r, float t_min, float t_max, hit_record &rec) const
 {
-    Vec3 oc = r.origin() - center;
-    float a = dot(r.direction(), r.direction());
-    float b = dot(oc, r.direction());
-    float c = dot(oc, oc) - radius * radius;
-    float discriminant = b * b - a * c;
+    vec3 oc = r.origin() - center;
+
+    float const a = dot(r.direction(), r.direction());
+    float const b = dot(oc, r.direction());
+    float const c = dot(oc, oc) - radius * radius;
+    float const discriminant = b * b - a * c;
+
     if (discriminant > 0)
     {
         float temp = (-b - sqrt(discriminant)) / a;
+
         if (temp < t_max && temp > t_min)
         {
             rec.t = temp;
@@ -75,7 +79,9 @@ __device__ bool sphere::hit(const ray &r, float t_min, float t_max, hit_record &
             rec.normal = (rec.p - center) / radius;
             return true;
         }
+
         temp = (-b + sqrt(discriminant)) / a;
+
         if (temp < t_max && temp > t_min)
         {
             rec.t = temp;
@@ -92,22 +98,25 @@ class hitable_list : public hitable
 {
 public:
     __device__ hitable_list() {}
+
     __device__ hitable_list(hitable **l, int n)
     {
         list = l;
         list_size = n;
     }
     __device__ virtual bool hit(const ray &r, float tmin, float tmax, hit_record &rec) const;
+
     hitable **list;
     int list_size;
 };
 
-//
+// Si occupa di lanciare tutte le hit function presenti nella lista di hitable
 __device__ bool hitable_list::hit(const ray &r, float t_min, float t_max, hit_record &rec) const
 {
     hit_record temp_rec;
     bool hit_anything = false;
     float closest_so_far = t_max;
+
     for (int i = 0; i < list_size; i++)
     {
         if (list[i]->hit(r, t_min, closest_so_far, temp_rec))
@@ -117,8 +126,32 @@ __device__ bool hitable_list::hit(const ray &r, float t_min, float t_max, hit_re
             rec = temp_rec;
         }
     }
+
     return hit_anything;
 }
+
+class camera
+{
+public:
+    __device__ camera()
+    {
+        lower_left_corner = vec3(-2.0, -1.0, -1.0);
+        horizontal = vec3(4.0, 0.0, 0.0);
+        vertical = vec3(0.0, 2.0, 0.0);
+        origin = vec3(0.0, 0.0, 0.0);
+    }
+
+    __device__ ray get_ray(float u, float v)
+    {
+        // Costruzione del raggio (parte dal TLC e va fino al LRC)
+        return ray(origin, lower_left_corner + u * horizontal + v * vertical - origin);
+    }
+
+    vec3 origin;
+    vec3 lower_left_corner;
+    vec3 horizontal;
+    vec3 vertical;
+};
 
 // limited version of checkCudaErrors from helper_cuda.h in CUDA examples
 #define checkCudaErrors(val) check_cuda((val), #val, __FILE__, __LINE__)
@@ -134,9 +167,9 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
     }
 }
 
-__device__ bool hit_sphere(const Vec3 &center, float radius, const ray &r)
+__device__ bool hit_sphere(const vec3 &center, float radius, const ray &r)
 {
-    Vec3 oc = r.origin() - center;
+    vec3 oc = r.origin() - center;
     float a = dot(r.direction(), r.direction());
     float b = 2.0f * dot(oc, r.direction());
     float c = dot(oc, oc) - radius * radius;
@@ -144,87 +177,131 @@ __device__ bool hit_sphere(const Vec3 &center, float radius, const ray &r)
     return (discriminant > 0.0f);
 }
 
-__device__ Vec3 color(const ray &r, hitable **world)
+__device__ vec3 color(const ray &r, hitable **world)
 {
     hit_record rec;
-    if ((*world)->hit(r, 0.0, FLT_MAX, rec))
+
+    if ((*world)->hit(r, 0.0f, FLT_MAX, rec))
     {
-        return 0.5f * Vec3(rec.normal.x() + 1.0f, rec.normal.y() + 1.0f, rec.normal.z() + 1.0f);
+        // Faccio rientrare nel range dei color [0, 1] (normal map)
+        return 0.5f * vec3(rec.normal.x() + 1.0f, rec.normal.y() + 1.0f, rec.normal.z() + 1.0f);
     }
     else
     {
-        Vec3 unit_direction = unit_vector(r.direction());
+        vec3 unit_direction = unit_vector(r.direction());
         float t = 0.5f * (unit_direction.y() + 1.0f);
-        return (1.0f - t) * Vec3(1.0, 1.0, 1.0) + t * Vec3(0.5, 0.7, 1.0);
+        // Interpolazione che da un effetto "cielo"
+        return (1.0f - t) * vec3(1.0f, 1.0f, 1.0f) + t * vec3(0.5f, 0.7f, 1.0f);
     }
 }
 
-__global__ void render(Vec3 *fb, int max_x, int max_y,
-                       Vec3 lower_left_corner, Vec3 horizontal,
-                       Vec3 vertical, Vec3 origin, hitable **world)
+__global__ void render_init(int max_x, int max_y, curandState *rand_state)
 {
-    int const i = threadIdx.x + blockIdx.x * blockDim.x; // Mi identifica i thread sulle ascisse della griglia
-    int const j = threadIdx.y + blockIdx.y * blockDim.y; // Mi identifica i thread sulle ordinate della griglia
+    // Indici della griglia bidimensionale
+    int const i = threadIdx.x + blockIdx.x * blockDim.x;
+    int const j = threadIdx.y + blockIdx.y * blockDim.y;
 
+    // Check bounds
     if ((i >= max_x) || (j >= max_y))
         return;
 
     // Indice del pixel su memoria contigua
     int const pixel_index = j * max_x + i;
 
-    float u = float(i) / float(max_x);
-    float v = float(j) / float(max_y);
-
-    // Costruzione del raggio
-    ray r(origin, lower_left_corner + u * horizontal + v * vertical);
-    fb[pixel_index] = color(r, world);
+    // Stesso seme per ogni thread, che genererà una differente sequenza numerica
+    curand_init(1984, pixel_index, 0, &rand_state[pixel_index]);
 }
 
-__global__ void create_world(hitable **d_list, hitable **d_world)
+__global__ void render(vec3 *fb, int max_x, int max_y, int ns,
+                       camera **cam, hitable **world, curandState *rand_state)
+{
+    // Indici della griglia bidimensionale
+    int const i = threadIdx.x + blockIdx.x * blockDim.x;
+    int const j = threadIdx.y + blockIdx.y * blockDim.y;
+
+    // Check bounds
+    if ((i >= max_x) || (j >= max_y))
+        return;
+
+    // Indice del pixel su memoria contigua
+    int const pixel_index = j * max_x + i;
+
+    // Preleva un numero randomico per il thread apposito
+    curandState local_rand_state = rand_state[pixel_index];
+
+    vec3 col(0, 0, 0);
+
+    for (int s = 0; s < ns; s++)
+    {
+        float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
+        float v = float(j + curand_uniform(&local_rand_state)) / float(max_y);
+        ray r = (*cam)->get_ray(u, v);
+        col += color(r, world);
+    }
+
+    // Traccia il raggio
+    fb[pixel_index] = col / float(ns);
+}
+
+__global__ void create_world(hitable **d_list, hitable **d_world, camera **d_camera)
 {
     // Ci assicuriamo che il popolamento di entrambe le liste avvenga soltanto una volta
     if (threadIdx.x == 0 && blockIdx.x == 0)
     {
-        *(d_list) = new sphere(Vec3(0, 0, -1), 0.5);
-        *(d_list + 1) = new sphere(Vec3(0, -100.5, -1), 100);
+        *(d_list) = new sphere(vec3(0, 0, -1), 0.5);
+        *(d_list + 1) = new sphere(vec3(0, -100.5, -1), 100);
         *d_world = new hitable_list(d_list, 2);
+        *d_camera = new camera();
     }
 }
 
-__global__ void free_world(hitable **d_list, hitable **d_world)
+__global__ void free_world(hitable **d_list, hitable **d_world, camera **d_camera)
 {
     delete *(d_list);
     delete *(d_list + 1);
     delete *d_world;
+    delete *d_camera;
 }
 
 int main(void)
 {
     int constexpr width = 1200;
     int constexpr height = 600;
+    int constexpr ns = 1000;
     int constexpr tx = 8;
     int constexpr ty = 8;
 
     std::vector<uint8_t> image;
 
-    std::cerr << "Rendering a " << width << "x" << height << " image ";
-    std::cerr << "in " << tx << "x" << ty << " blocks.\n";
+    std::cerr << "Dimensione del framebuffer, " << width << "x" << height << "\n";
+    std::cerr << "Dimensione della griglia (" << width / tx + 1 << ", " << height / ty + 1 << ")\n"
+              << std::endl;
+    std::cerr << "Dimensione dei blocchi (" << tx << ", " << ty << ")\n";
 
-    int num_pixels = width * height;
-    size_t fb_size = num_pixels * sizeof(Vec3);
+    int constexpr num_pixels = width * height;
+    size_t fb_size = num_pixels * sizeof(vec3);
 
-    // allocate FB
-    Vec3 *fb;
+    // Allocazione del FrameBuffer che conterrà l'immagine (memoria unificata)
+    vec3 *fb;
     checkCudaErrors(cudaMallocManaged((void **)&fb, fb_size));
+
+    // Allocazione di un Random State
+    curandState *d_rand_state;
+    checkCudaErrors(cudaMalloc((void **)&d_rand_state, num_pixels * sizeof(curandState)));
 
     // Allocazione sulla GPU della lista di hitables
     hitable **d_list;
     checkCudaErrors(cudaMalloc((void **)&d_list, 2 * sizeof(hitable *)));
+
     // Allocazione del mondo che conterrà gli oggetti
     hitable **d_world;
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hitable *)));
-    // Popolamento da device di entrambe le liste
-    create_world<<<1, 1>>>(d_list, d_world);
+
+    camera **d_camera;
+    checkCudaErrors(cudaMalloc((void **)&d_camera, sizeof(camera *)));
+
+    // Kernel che si occupa del popolamento del mondo
+    create_world<<<1, 1>>>(d_list, d_world, d_camera);
 
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
@@ -233,21 +310,21 @@ int main(void)
     dim3 blocks(width / tx + 1, height / ty + 1);
     dim3 threads(tx, ty);
 
-    //   clock_t start, stop;
-    // start = clock();
-    // Il mondo (d_world) viene passato come parametro alla funzione di rendering
-    render<<<blocks, threads>>>(fb, width, height,
-                                Vec3(-2.0, -1.0, -1.0),
-                                Vec3(4.0, 0.0, 0.0),
-                                Vec3(0.0, 2.0, 0.0),
-                                Vec3(0.0, 0.0, 0.0),
-                                d_world);
+    render_init<<<blocks, threads>>>(width, height, d_rand_state);
+
+    clock_t start, stop;
+    start = clock();
+
+    render<<<blocks, threads>>>(fb, width, height, ns,
+                                d_camera,
+                                d_world, d_rand_state);
 
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
-    //double timer_seconds = ((double)(stop - start)) / CLOCKS_PER_SEC;
-    //std::cerr << "took " << timer_seconds << " seconds.\n";
+    stop = clock();
+    double timer_seconds = static_cast<double>((stop - start)) / static_cast<double>(CLOCKS_PER_SEC);
+    std::cerr << "Il rendering ha impiegato " << timer_seconds << " secondi.\n";
 
     // Salvo l'immagine (host code)
     std::cout << "P3\n"
@@ -266,13 +343,26 @@ int main(void)
             image.push_back(ib);
         }
     }
+
     stbi_write_png("output.png", width, height, 3, image.data(), 0);
 
-    // Si libera la device memory
-    free_world<<<1, 1>>>(d_list, d_world);
-    checkCudaErrors(cudaFree(d_list));
+    // clean up
+    checkCudaErrors(cudaDeviceSynchronize());
+    free_world<<<1, 1>>>(d_list, d_world, d_camera);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaFree(d_camera));
     checkCudaErrors(cudaFree(d_world));
+    checkCudaErrors(cudaFree(d_list));
+    checkCudaErrors(cudaFree(d_rand_state));
     checkCudaErrors(cudaFree(fb));
+
+    d_list = NULL;
+    d_camera = NULL;
+    d_world = NULL;
+    fb = NULL;
+    d_rand_state = NULL;
+
+    cudaDeviceReset();
 
     return 0;
 }
