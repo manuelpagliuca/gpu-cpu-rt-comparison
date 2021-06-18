@@ -14,6 +14,7 @@
 
 // Classe vec3
 #include "vec3.h"
+#define RANDVEC3 vec3(curand_uniform(local_rand_state), curand_uniform(local_rand_state), curand_uniform(local_rand_state))
 
 // Classe per il raggio
 class ray
@@ -135,10 +136,10 @@ class camera
 public:
     __device__ camera()
     {
-        lower_left_corner = vec3(-2.0, -1.0, -1.0);
-        horizontal = vec3(4.0, 0.0, 0.0);
-        vertical = vec3(0.0, 2.0, 0.0);
-        origin = vec3(0.0, 0.0, 0.0);
+        lower_left_corner = vec3(-2.0f, -1.0f, -1.0f);
+        horizontal = vec3(4.0f, 0.0f, 0.0f);
+        vertical = vec3(0.0f, 2.0f, 0.0f);
+        origin = vec3(0.0f, 0.0f, 0.0f);
     }
 
     __device__ ray get_ray(float u, float v)
@@ -152,6 +153,16 @@ public:
     vec3 horizontal;
     vec3 vertical;
 };
+
+__device__ vec3 random_in_unit_sphere(curandState *local_rand_state)
+{
+    vec3 p;
+    do
+    {
+        p = 2.0f * RANDVEC3 - vec3(1.0f, 1.0f, 1.0f);
+    } while (p.squared_length() >= 1.0f);
+    return p;
+}
 
 // limited version of checkCudaErrors from helper_cuda.h in CUDA examples
 #define checkCudaErrors(val) check_cuda((val), #val, __FILE__, __LINE__)
@@ -170,29 +181,47 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
 __device__ bool hit_sphere(const vec3 &center, float radius, const ray &r)
 {
     vec3 oc = r.origin() - center;
-    float a = dot(r.direction(), r.direction());
-    float b = 2.0f * dot(oc, r.direction());
-    float c = dot(oc, oc) - radius * radius;
-    float discriminant = b * b - 4.0f * a * c;
+
+    float const a = dot(r.direction(), r.direction());
+    float const b = 2.0f * dot(oc, r.direction());
+    float const c = dot(oc, oc) - radius * radius;
+    float const discriminant = b * b - 4.0f * a * c;
+
     return (discriminant > 0.0f);
 }
 
-__device__ vec3 color(const ray &r, hitable **world)
+// La versione del codice C++ di Peter Shirley richiede l'utilizzo intensivo della
+// ricorsione in questa funzione. Quindi per evitare di rompere i limiti di profondità
+// garantiti dal parallelismo dinamico dobbiamo imporre un limite fisso iterazioni
+// anzichè ricorsioni (50).
+
+__device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_state)
 {
+    ray cur_ray = r;
+    float cur_attenuation = 1.0f;
     hit_record rec;
 
-    if ((*world)->hit(r, 0.0f, FLT_MAX, rec))
+    for (int i = 0; i < 50; i++)
     {
-        // Faccio rientrare nel range dei color [0, 1] (normal map)
-        return 0.5f * vec3(rec.normal.x() + 1.0f, rec.normal.y() + 1.0f, rec.normal.z() + 1.0f);
+        hit_record rec;
+
+        if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec))
+        {
+            vec3 target = rec.p + rec.normal + random_in_unit_sphere(local_rand_state);
+            cur_attenuation *= 0.5f;              // gamma correction
+            cur_ray = ray(rec.p, target - rec.p); // raggio che va in direzione della sfera unitaria
+        }
+        else
+        {
+            vec3 unit_direction = unit_vector(cur_ray.direction());
+            float const t = 0.5f * (unit_direction.y() + 1.0f);
+            vec3 c = (1.0f - t) * vec3(1.0f, 1.0f, 1.0f) + t * vec3(0.5f, 0.7f, 1.0f);
+            return cur_attenuation * c;
+        }
     }
-    else
-    {
-        vec3 unit_direction = unit_vector(r.direction());
-        float t = 0.5f * (unit_direction.y() + 1.0f);
-        // Interpolazione che da un effetto "cielo"
-        return (1.0f - t) * vec3(1.0f, 1.0f, 1.0f) + t * vec3(0.5f, 0.7f, 1.0f);
-    }
+
+    // Nel caso in cui il limite venga superato
+    return vec3(0.0f, 0.0f, 0.0f);
 }
 
 __global__ void render_init(int max_x, int max_y, curandState *rand_state)
@@ -233,14 +262,19 @@ __global__ void render(vec3 *fb, int max_x, int max_y, int ns,
 
     for (int s = 0; s < ns; s++)
     {
-        float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
-        float v = float(j + curand_uniform(&local_rand_state)) / float(max_y);
+        float const u = static_cast<float>(i + curand_uniform(&local_rand_state)) / static_cast<float>(max_x);
+        float const v = static_cast<float>(j + curand_uniform(&local_rand_state)) / static_cast<float>(max_y);
         ray r = (*cam)->get_ray(u, v);
-        col += color(r, world);
+        col += color(r, world, &local_rand_state);
     }
 
-    // Traccia il raggio
-    fb[pixel_index] = col / float(ns);
+    rand_state[pixel_index] = local_rand_state;
+
+    col /= static_cast<float>(ns);
+    col[0] = sqrtf(col[0]);
+    col[1] = sqrtf(col[1]);
+    col[2] = sqrtf(col[2]);
+    fb[pixel_index] = col;
 }
 
 __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_camera)
@@ -248,8 +282,8 @@ __global__ void create_world(hitable **d_list, hitable **d_world, camera **d_cam
     // Ci assicuriamo che il popolamento di entrambe le liste avvenga soltanto una volta
     if (threadIdx.x == 0 && blockIdx.x == 0)
     {
-        *(d_list) = new sphere(vec3(0, 0, -1), 0.5);
-        *(d_list + 1) = new sphere(vec3(0, -100.5, -1), 100);
+        *(d_list) = new sphere(vec3(0.0f, 0.0f, -1.0f), 0.5f);
+        *(d_list + 1) = new sphere(vec3(0.0f, -100.5f, -1.0f), 100.0f);
         *d_world = new hitable_list(d_list, 2);
         *d_camera = new camera();
     }
@@ -267,7 +301,10 @@ int main(void)
 {
     int constexpr width = 1200;
     int constexpr height = 600;
-    int constexpr ns = 1000;
+    int ns = 10;
+    std::cout << "Inserire il numero di samples da utilizzare : " << std::endl;
+    std::cin >> ns;
+
     int constexpr tx = 8;
     int constexpr ty = 8;
 
