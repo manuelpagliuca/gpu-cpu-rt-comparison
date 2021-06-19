@@ -12,23 +12,19 @@
 
     The comparisons will be written in README.md and in a LaTex file.
 */
-
 #pragma once
 
-#include "ray.h"
+#include <curand_kernel.h>
 
-class material;
+#define checkCudaErrors(val) check_cuda((val), #val, __FILE__, __LINE__)
 
-struct hit_record
+void check_cuda(cudaError_t result, char const *const func, const char *const file, const int line)
 {
-    float t;
-    vec3 p;
-    vec3 normal;
-    material *mat_ptr;
-};
-
-class hitable
-{
-public:
-    __device__ virtual bool hit(const ray &r, const float t_min, const float t_max, hit_record &rec) const = 0;
-};
+    if (result)
+    {
+        std::cerr << "CUDA error = " << static_cast<unsigned int>(result) << " at " << file << ":" << line << " '" << func << "' \n";
+        // Prima di uscire chiama la cudaDeviceReset()
+        cudaDeviceReset();
+        exit(99);
+    }
+}

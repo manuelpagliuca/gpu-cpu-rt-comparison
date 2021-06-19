@@ -3,6 +3,7 @@
         "ctime": "cpp",
         "xiosbase": "cpp",
         "list": "cpp",
-        "ostream": "cpp"
+        "ostream": "cpp",
+        "cmath": "cpp"
     }
 }

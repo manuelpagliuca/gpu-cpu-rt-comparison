@@ -1,19 +1,32 @@
-#ifndef MATERIALH
-#define MATERIALH
+/*
+    ///////////////////////////////////////////////////////////////////////////////////////
+    ///  Project for the GPU COMPUTING Course @UNIMI, Manuel Pagliuca, A.Y. 2020/2021.  ///
+    ///////////////////////////////////////////////////////////////////////////////////////
+
+    This Raytracer is a makeover of the notorious Peter Shirley 'Raytracing in one weekend' book
+    This is the link to the book : https://raytracing.github.io/books/RayTracingInOneWeekend.html
+
+    I also used several chapters from a Roger Allen (principal architect from NVDIA) blog page, which
+    implemented the Peter Shirley CPU-Only Raytracer for GPU execution with CUDA.
+    This is the link to the blog page : https://developer.nvidia.com/blog/accelerated-ray-tracing-cuda/
+
+    The comparisons will be written in README.md and in a LaTex file.
+*/
+
+#pragma once
 
 struct hit_record;
 
 #include "../math/ray.h"
 #include "../math/hitable.h"
 
-__device__ float schlick(float cosine, float ref_idx)
+__device__ float schlick(const float cosine, const float ref_idx)
 {
-    float r0 = (1.0f - ref_idx) / (1.0f + ref_idx);
-    r0 = r0 * r0;
-    return r0 + (1.0f - r0) * pow((1.0f - cosine), 5.0f);
+    const float r0 = powf((1.0f - ref_idx) / (1.0f + ref_idx), 2.0f);
+    return r0 + (1.0f - r0) * powf((1.0f - cosine), 5.0f);
 }
 
-__device__ bool refract(const vec3 &v, const vec3 &n, float ni_over_nt, vec3 &refracted)
+__device__ bool refract(const vec3 &v, const vec3 &n, const float ni_over_nt, vec3 &refracted)
 {
     vec3 uv = unit_vector(v);
     const float dt = dot(uv, n);
@@ -29,7 +42,6 @@ __device__ bool refract(const vec3 &v, const vec3 &n, float ni_over_nt, vec3 &re
 }
 
 #define RANDVEC3 vec3(curand_uniform(local_rand_state), curand_uniform(local_rand_state), curand_uniform(local_rand_state))
-
 __device__ vec3 random_in_unit_sphere(curandState *local_rand_state)
 {
     vec3 p;
@@ -104,6 +116,7 @@ public:
         vec3 refracted;
         float reflect_prob;
         float cosine;
+
         if (dot(r_in.direction(), rec.normal) > 0.0f)
         {
             outward_normal = -rec.normal;
@@ -117,17 +130,19 @@ public:
             ni_over_nt = 1.0f / ref_idx;
             cosine = -dot(r_in.direction(), rec.normal) / r_in.direction().length();
         }
+
         if (refract(r_in.direction(), outward_normal, ni_over_nt, refracted))
             reflect_prob = schlick(cosine, ref_idx);
         else
             reflect_prob = 1.0f;
+
         if (curand_uniform(local_rand_state) < reflect_prob)
             scattered = ray(rec.p, reflected);
         else
             scattered = ray(rec.p, refracted);
+
         return true;
     }
 
     float ref_idx;
 };
-#endif
