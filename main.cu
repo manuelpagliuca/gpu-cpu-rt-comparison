@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cfloat>
 #include <vector>
+#include <string>
 
 #include <curand_kernel.h>
 
@@ -246,7 +247,8 @@ int main()
         }
     }
 
-    stbi_write_png("render.png", nx, ny, 3, image.data(), 0);
+    std::string filename = std::to_string(nx) + "x" + std::to_string(ny) + "_" + std::to_string(ns) + "samples.png";
+    stbi_write_png(filename.c_str(), nx, ny, 3, image.data(), 0);
 
     // Clean up
     checkCudaErrors(cudaDeviceSynchronize());
