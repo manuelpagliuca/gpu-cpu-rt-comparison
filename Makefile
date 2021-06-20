@@ -20,7 +20,7 @@ rt.o: $(SRCS) $(INCS)
 
 # use nvprof --query-metrics
 profile_metrics: rt
-	nvprof --metrics achieved_occupancy,inst_executed,inst_fp_32,inst_fp_64,inst_integer ./rt
+	nvprof --metrics achieved_occupancy,inst_executed,inst_fp_32,inst_fp_64,inst_integer,dram_read_throughput,dram_write_throughput,ipc,ipc_instance,sm_efficiency,warp_execution_efficiency ./rt
 
 clean:
 	rm -f rt rt.o render.png

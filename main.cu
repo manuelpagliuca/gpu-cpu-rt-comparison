@@ -14,7 +14,7 @@
 */
 
 #include <iostream>
-#include <ctime>
+#include <chrono>
 #include <cfloat>
 #include <vector>
 
@@ -35,7 +35,7 @@
 // This function in the sequential code version used heavilty recursion
 // in this case since we are running this kernel on a thread we don't want
 // to used it too much, and we need to impose a static limit (of 50).
-// In my hostcode-only raytracer the function is called 'pixelColorFunction'
+// In the CPU-only raytracer the function is called 'pixelColorFunction'
 __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_state)
 {
     ray cur_ray = r;
@@ -170,8 +170,9 @@ int main()
     int nx = 800;
     int ny = 600;
     int ns = 10;
-    const int tx = 8;
-    const int ty = 8;
+    constexpr int tx = 8;
+    constexpr int ty = 8;
+
     std::vector<uint8_t> image;
 
     std::cout << "Inserire la risoluzione, si consiglia caldamente "
@@ -188,7 +189,7 @@ int main()
     std::cerr << "Dimensione della griglia (" << nx / tx + 1 << ", " << ny / ty + 1 << ")\n";
     std::cerr << "Dimensione dei blocchi (" << tx << ", " << ty << ")" << std::endl;
 
-    const int num_pixels = nx * ny;
+    int num_pixels = nx * ny;
     size_t fb_size = num_pixels * sizeof(vec3);
 
     // Allocazione del framebuffer
@@ -211,21 +212,23 @@ int main()
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
-    // Rendering
-    clock_t start, stop;
-    start = clock();
+    // Initialisation
     dim3 blocks(nx / tx + 1, ny / ty + 1);
     dim3 threads(tx, ty);
     render_init<<<blocks, threads>>>(nx, ny, d_rand_state);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+
+    // Render
+    auto start = std::chrono::system_clock::now();
+
     render<<<blocks, threads>>>(fb, nx, ny, ns, d_camera, d_world, d_rand_state);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-    stop = clock();
-    const double timer_seconds = static_cast<const double>(stop - start) / static_cast<const double>(CLOCKS_PER_SEC);
 
-    std::cerr << "Il rendering ha impiegato " << timer_seconds << " secondi.\n";
+    auto end = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end - start;
+    std::cout << "It tooks " << elapsed_seconds.count() << " seconds \n\n\n";
 
     // Salvataggio dell'immagine su disco
     for (int j = ny - 1; j >= 0; j--)
