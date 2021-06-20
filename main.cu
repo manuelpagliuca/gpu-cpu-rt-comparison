@@ -176,19 +176,19 @@ int main()
 
     std::vector<uint8_t> image;
 
-    std::cout << "Inserire la risoluzione, si consiglia caldamente "
-                 "di rispettare l'aspect ratio di 16:9\n"
-                 "Inserire la larghezza : ";
+    std::cout << "Insert resolutions : "
+                 "Respect the aspect ratio of 16:9\n"
+                 "Width : ";
     std::cin >> nx;
-    std::cout << "Inserire l'altezza : ";
+    std::cout << "Height : ";
     std::cin >> ny;
-    std::cout << "Inserire il numero di samples da utilizzare : ";
+    std::cout << "Number of samples : ";
     std::cin >> ns;
     std::cout << std::endl;
 
-    std::cerr << "Dimensione del framebuffer, " << nx << "x" << ny << "\n";
-    std::cerr << "Dimensione della griglia (" << nx / tx + 1 << ", " << ny / ty + 1 << ")\n";
-    std::cerr << "Dimensione dei blocchi (" << tx << ", " << ty << ")" << std::endl;
+    std::cerr << "Framebuffer : " << nx << "x" << ny << "\n";
+    std::cerr << "Grid dim(" << nx / tx + 1 << ", " << ny / ty + 1 << ")\n";
+    std::cerr << "Thread-block dim(" << tx << ", " << ty << ")" << std::endl;
 
     int num_pixels = nx * ny;
     size_t fb_size = num_pixels * sizeof(vec3);
@@ -229,7 +229,7 @@ int main()
 
     auto end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end - start;
-    std::cout << "It tooks " << elapsed_seconds.count() << " seconds \n\n\n";
+    std::cout << "It took " << elapsed_seconds.count() << " seconds \n\n\n";
 
     // Salvataggio dell'immagine su disco
     for (int j = ny - 1; j >= 0; j--)
