@@ -41,6 +41,7 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
 {
     ray cur_ray = r;
     vec3 cur_attenuation = vec3(1.0f, 1.0f, 1.0f);
+
     for (int i = 0; i < 50; i++)
     {
         hit_record rec;
@@ -61,7 +62,7 @@ __device__ vec3 color(const ray &r, hitable **world, curandState *local_rand_sta
         else
         {
             vec3 unit_direction = unit_vector(cur_ray.direction());
-            float t = 0.5f * (unit_direction.y() + 1.0f);
+            const float t = 0.5f * (unit_direction.y() + 1.0f);
             vec3 c = (1.0f - t) * vec3(1.0f, 1.0f, 1.0f) + t * vec3(0.5f, 0.7f, 1.0f);
             return cur_attenuation * c;
         }
@@ -76,7 +77,7 @@ __global__ void rand_init(curandState *rand_state)
     // first thread initialize the seed with no offsets
     if (threadIdx.x == 0 && blockIdx.x == 0)
     {
-        curand_init(1984, 0, 0, rand_state);
+        curand_init(2048, 0, 0, rand_state);
     }
 }
 
@@ -91,7 +92,7 @@ __global__ void render_init(const int max_x, const int max_y, curandState *rand_
     const int pixel_index = j * max_x + i;
 
     // Each thread gets a different seed and got a unique initialized curand state
-    curand_init(1984 + pixel_index, 0, 0, &rand_state[pixel_index]);
+    curand_init(2048 + pixel_index, 0, 0, &rand_state[pixel_index]);
 }
 
 __global__ void render(vec3 *fb, const int max_x, const int max_y, const int ns, camera **cam, hitable **world, curandState *rand_state)
@@ -119,9 +120,9 @@ __global__ void render(vec3 *fb, const int max_x, const int max_y, const int ns,
     rand_state[pixel_index] = local_rand_state;
 
     col /= static_cast<const float>(ns);
-    col[0] = sqrt(col[0]);
-    col[1] = sqrt(col[1]);
-    col[2] = sqrt(col[2]);
+    col[0] = sqrtf(col[0]);
+    col[1] = sqrtf(col[1]);
+    col[2] = sqrtf(col[2]);
 
     fb[pixel_index] = col;
 }
@@ -251,7 +252,6 @@ int main()
     stbi_write_png(filename.c_str(), nx, ny, 3, image.data(), 0);
 
     // Clean up
-    checkCudaErrors(cudaDeviceSynchronize());
     free_world<<<1, 1>>>(d_list, d_world, d_camera);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaFree(d_camera));
