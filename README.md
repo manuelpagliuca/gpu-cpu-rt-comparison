@@ -1,9 +1,11 @@
-# Ray Tracing in One Weekend with CUDA
+# CUDA Ray Tracer: implementation, comparison and profiling
+This is a project for the **GPU COMPUTING** course at the University of MIlan, MsC's in Computer Science, A.Y. 2020/2021.
+The project I made consists in a comparison made between a CPU implementation of the Ray Tracer and a GPU implementation
+made it with CUDA. For reading the report just click this [link](https://github.com/manuelpagliuca/Ray-Tracer-CUDA/blob/main/GPU_COMPUTING___RAY_TRACER%20.pdf).
+## Compiling
+`nvcc main.cu -o rt`
 
-This is a project for the GPU COMPUTING course during the A.Y. 2020/2021 @UNIMI, Milan.
-
-Compiling : `nvcc main.cu -o rt`
-
-Profiling : `nvprof --metrics achieved_occupancy,inst_executed,inst_fp_32,inst_fp_64,inst_integer,dram_read_throughput,dram_write_throughput,ipc,ipc_instance,sm_efficiency,warp_execution_efficiency ./rt`
+## Profiling
+`nvprof --metrics achieved_occupancy,inst_executed,inst_fp_32,inst_fp_64,inst_integer,dram_read_throughput,dram_write_throughput,ipc,ipc_instance,sm_efficiency,warp_execution_efficiency ./rt`
 
 For other informations about the comparison with the CPU versione of the same scene, check the PDF paper.
